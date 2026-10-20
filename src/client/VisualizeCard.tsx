@@ -366,11 +366,23 @@ function launcherLabels() {
  * The live, inert thumbnail of a page: the same sandboxed page document, laid
  * out at desktop width and scaled into the launcher. Pointer events and focus
  * stay out of the frame, so it never takes a click, a scroll, or a tab stop;
- * a click on the thumbnail opens the page like the button does.
+ * a click on the thumbnail opens the page like the button does. The frame
+ * only runs near the viewport; its fixed-size wrapper stays mounted.
  */
 function PageThumbnail({ meta, callId, onOpen }: { meta: VisualizeMeta; callId: string; onOpen: (() => void) | undefined }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
+  const [visible, setVisible] = useState(() => typeof IntersectionObserver !== 'function')
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (wrap === null || typeof IntersectionObserver !== 'function') return
+    const observer = new IntersectionObserver(
+      entries => setVisible(entries.some(entry => entry.isIntersecting)),
+      { rootMargin: '200px' },
+    )
+    observer.observe(wrap)
+    return () => observer.disconnect()
+  }, [])
   useEffect(() => {
     const wrap = wrapRef.current
     if (wrap === null) return
@@ -386,27 +398,29 @@ function PageThumbnail({ meta, callId, onOpen }: { meta: VisualizeMeta; callId: 
   const scale = width > 0 ? width / THUMB_VIEWPORT_WIDTH : 0.5
   return (
     <div ref={wrapRef} style={thumbStyle} aria-hidden="true" onClick={onOpen}>
-      <iframe
-        key={colorScheme}
-        sandbox={FRAME_SANDBOX}
-        referrerPolicy="no-referrer"
-        title={meta.title}
-        srcDoc={doc}
-        tabIndex={-1}
-        style={{
-          display: 'block',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: THUMB_VIEWPORT_WIDTH,
-          height: THUMB_VIEWPORT_HEIGHT,
-          border: 0,
-          transform: `scale(${scale})`,
-          transformOrigin: '0 0',
-          pointerEvents: 'none',
-          colorScheme,
-        }}
-      />
+      {visible && (
+        <iframe
+          key={colorScheme}
+          sandbox={FRAME_SANDBOX}
+          referrerPolicy="no-referrer"
+          title={meta.title}
+          srcDoc={doc}
+          tabIndex={-1}
+          style={{
+            display: 'block',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: THUMB_VIEWPORT_WIDTH,
+            height: THUMB_VIEWPORT_HEIGHT,
+            border: 0,
+            transform: `scale(${scale})`,
+            transformOrigin: '0 0',
+            pointerEvents: 'none',
+            colorScheme,
+          }}
+        />
+      )}
     </div>
   )
 }
