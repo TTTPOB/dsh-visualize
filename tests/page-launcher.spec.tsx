@@ -66,6 +66,7 @@ describe('page launcher', () => {
   })
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -77,7 +78,8 @@ describe('page launcher', () => {
     return container
   }
 
-  it('shows title, summary, an inert sandboxed thumbnail, and an open button — never the page itself', () => {
+  it('shows an eager inert thumbnail when IntersectionObserver is unavailable', () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
     const container = mount(PAGE)
     expect(container.textContent).toContain('销售数据看板')
     expect(container.textContent).toContain('按地区和日期筛选的销售概览')
@@ -92,6 +94,42 @@ describe('page launcher', () => {
     expect(container.querySelectorAll('script')).toHaveLength(0)
     expect(thumb.getAttribute('srcdoc')).toContain('.viz-page-header')
     expect([...container.querySelectorAll('button')].map(b => b.textContent)).toContain('Open page')
+  })
+
+  it('mounts the thumbnail only near the viewport without affecting the launcher or expanded frame', () => {
+    let notify: (entries: IntersectionObserverEntry[]) => void
+    const observe = vi.fn()
+    const disconnect = vi.fn()
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: typeof notify) { notify = callback }
+      observe = observe
+      disconnect = disconnect
+    })
+    const container = mount(PAGE)
+    const wrap = container.querySelector<HTMLDivElement>('[aria-hidden="true"]')!
+    expect(observe).toHaveBeenCalledWith(wrap)
+    expect(wrap.style.height).toBe('220px')
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(container.textContent).toContain(PAGE.title)
+    expect(container.textContent).toContain(PAGE.summary)
+    expect([...container.querySelectorAll('button')].map(b => b.textContent)).toContain('Open page')
+
+    const intersect = (isIntersecting: boolean) => act(() => notify([{ isIntersecting } as IntersectionObserverEntry]))
+    intersect(true)
+    const thumb = container.querySelector('iframe')!
+    expect(thumb).not.toBeNull()
+    intersect(false)
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(thumb.isConnected).toBe(false)
+    expect(container.contains(wrap)).toBe(true)
+    expect(wrap.style.height).toBe('220px')
+
+    const expand = [...container.querySelectorAll('button')].find(b => b.textContent === 'Show here')!
+    act(() => expand.click())
+    expect(disconnect).toHaveBeenCalledTimes(1)
+    const frame = container.querySelector('iframe')!
+    expect(frame).not.toBeNull()
+    expect(frame.style.pointerEvents).not.toBe('none')
   })
 
   it('opens the page in a new tab whose only content is the sandboxed frame', async () => {
