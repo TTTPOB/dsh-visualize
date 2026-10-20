@@ -174,7 +174,8 @@ export function visualizeTool(
       // An update patches the stored copy, the one card state both halves
       // agree on: persisted meta is not readable from here, and the model's
       // own transcript may hold a fragment an earlier patch already replaced.
-      // It rewrites that same file rather than deriving a new name, so a
+      // Within a session it rewrites the same file; a fork copies its parent's
+      // card into its own store directory, keeping the basename. A
       // second patch in the same reply builds on the first — a fresh path per
       // patch would leave later patches addressing a base already superseded,
       // and each would silently drop every edit but its own.
