@@ -15,11 +15,13 @@
  * session workspace written through `ctx.fs` and the session sandbox policy.
  *
  * An `update` path is model-supplied, so it is only trusted as far as it
- * proves itself: a path inside the store is read and rewritten with node fs;
- * a legacy `viz/...` copy from an earlier session must be an `.html` file
- * inside the session workspace, after `~` expansion, `..` normalization, and
- * symlink resolution, and goes through `ctx.fs` under the sandbox policy. Any
- * other path is refused before it is read: the sandbox confines writes, not
+ * proves itself: a path inside the store is read with node fs, but updates
+ * write the same basename in the current session's directory. Without a
+ * current session id, store updates are refused. A legacy workspace card must
+ * be a direct-child `.html` file of `<workspace>/viz/`, after `~` expansion,
+ * `..` normalization, and symlink containment checks against that directory,
+ * and goes through `ctx.fs` under the sandbox policy. Any other path is
+ * refused before it is read: the sandbox confines writes, not
  * reads, and a failed patch quotes card text back to the model.
  *
  * @module @nagi-ovo/dsh-visualize/storage
@@ -28,7 +30,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -80,7 +82,12 @@ export function cardStore(ctx: Context, exec: CardExec): CardStore {
     },
     async open(path) {
       const owned = root === undefined ? undefined : await ownedPath(root, path)
-      if (owned !== undefined) return ownedFile(root!, owned)
+      if (owned !== undefined) {
+        if (typeof sessionId !== 'string' || sessionId.length === 0) {
+          throw new Error('invalid visualization patch: a current session id is required to update a stored card')
+        }
+        return ownedFile(root!, join(root!, 'sessions', sessionSegment(sessionId), basename(owned)), owned)
+      }
       const legacy = await workspacePath(workspace.root, path)
       if (legacy === undefined) {
         throw new Error(
@@ -94,9 +101,10 @@ export function cardStore(ctx: Context, exec: CardExec): CardStore {
 }
 
 /**
- * Accept a model-supplied path as a legacy workspace card only if it names an
- * `.html` file inside the session workspace, lexically and after symlink
- * resolution. The fs seam's sandbox confines writes but not reads, and a
+ * Accept a model-supplied path as a legacy workspace card only if it names a
+ * direct-child `.html` file of the workspace's `viz/` directory, lexically
+ * and contained in that directory after symlink resolution. The fs seam's
+ * sandbox confines writes but not reads, and a
  * failed patch quotes the card text back, so an unconfined read would leak
  * any file the host can open.
  * @param root - the session workspace root, undefined when the session has none.
@@ -107,9 +115,9 @@ export async function workspacePath(root: string | undefined, path: string): Pro
   if (root === undefined || !isAbsolute(root)) return undefined
   const tilde = path === '~' || path.startsWith('~/')
   const expanded = tilde ? join(homedir(), path.slice(1)) : path
-  const base = resolve(root)
-  const target = resolve(base, expanded)
-  if (!inside(base, target) || !target.endsWith('.html')) return undefined
+  const base = resolve(root, 'viz')
+  const target = resolve(root, expanded)
+  if (dirname(target) !== base || !target.endsWith('.html')) return undefined
   const realRoot = await realpath(base).catch(() => base)
   if (!inside(realRoot, await realpathOfDeepest(target))) return undefined
   // A plain relative path resolves against this same root in the seam, which
@@ -205,13 +213,14 @@ export function inside(root: string, target: string): boolean {
  * A plugin-owned card file, read and written with node fs. Writes go through
  * a sibling temporary file and a rename, so a reader never sees half a card.
  * @param root - absolute store root, for the display form.
- * @param path - absolute file path below the root.
+ * @param path - absolute write path below the root.
+ * @param source - absolute read path, which may belong to an earlier session.
  * @returns the card file.
  */
-function ownedFile(root: string, path: string): CardFile {
+function ownedFile(root: string, path: string, source = path): CardFile {
   return {
     displayPath: displayOf(path),
-    read: async () => await readFile(path, 'utf8'),
+    read: async () => await readFile(source, 'utf8'),
     write: async content => await writeFileAtomic(path, content),
   }
 }

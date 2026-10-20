@@ -74,6 +74,39 @@ describe('card storage', () => {
     expect(seam.resolved).toEqual([])
   })
 
+  it('copies a parent session card into the current session, preserving its style and page suffix', async () => {
+    const { ctx } = host()
+    const tool = visualizeTool(ctx, 10_000, 'editorial')
+    const created = await tool.execute({ fragment: '<p>old</p>', title: 'Lab', mode: 'page' }, exec('parent')) as { path: string }
+    const patched = await visualizeTool(ctx, 10_000, 'sketch').execute(
+      { action: 'update', path: created.path, title: 'Lab', old_str: 'old', new_str: 'new' },
+      exec('fork/session'),
+    ) as { path: string; fragment: string; style: string; mode: string }
+
+    expect(patched.path).toBe(created.path.replace('/parent/', '/fork~002fsession/'))
+    expect(patched.style).toBe('editorial')
+    expect(patched.mode).toBe('page')
+    expect(await readFile(created.path, 'utf8')).toBe('<p>old</p>')
+    expect(await readFile(patched.path, 'utf8')).toBe('<p>new</p>')
+    const second = await tool.execute(
+      { action: 'update', path: patched.path, title: 'Lab', old_str: 'new', new_str: 'latest' },
+      exec('fork/session'),
+    ) as { path: string }
+    expect(second.path).toBe(patched.path)
+    expect(await readFile(second.path, 'utf8')).toBe('<p>latest</p>')
+  })
+
+  it('refuses a stored card update without a current session id', async () => {
+    const { ctx } = host()
+    const tool = visualizeTool(ctx, 10_000)
+    const created = await tool.execute({ fragment: '<p>old</p>', title: 'Lab' }, exec('parent')) as { path: string }
+    await expect(tool.execute(
+      { action: 'update', path: created.path, title: 'Lab', old_str: 'old', new_str: 'new' },
+      exec(''),
+    )).rejects.toThrow(/current session id is required/u)
+    expect(await readFile(created.path, 'utf8')).toBe('<p>old</p>')
+  })
+
   it('keeps conversations apart', async () => {
     const { ctx } = host()
     const tool = visualizeTool(ctx, 10_000)
@@ -225,6 +258,19 @@ describe('legacy workspace cards', () => {
     await tool.execute({ action: 'update', path: 'viz/lab-0badf00d.html', title: 'Lab', old_str: 'old', new_str: 'mid' }, exec('sess-6'))
     await tool.execute({ action: 'update', path: join(workspace, 'viz', 'lab-0badf00d.html'), title: 'Lab', old_str: 'mid', new_str: 'new' }, exec('sess-6'))
     expect(await readFile(join(workspace, 'viz', 'lab-0badf00d.html'), 'utf8')).toBe('<p>new</p>')
+  })
+
+  it('refuses workspace HTML outside the direct children of viz/ before reading', async () => {
+    await writeFile(join(workspace, 'index.html'), '<p>secret token 0xC0FFEE</p>')
+    await mkdir(join(workspace, 'viz', 'sub'))
+    await writeFile(join(workspace, 'viz', 'sub', 'x.html'), '<p>secret token 0xC0FFEE</p>')
+    const { tool, resolved } = diskHost()
+    for (const path of ['index.html', 'viz/../index.html', 'viz/sub/x.html']) {
+      const message = await probe(tool, path)
+      expect(message).toMatch(/is not a card visualize can patch/u)
+      expect(message).not.toContain('0xC0FFEE')
+    }
+    expect(resolved).toEqual([])
   })
 
   it('refuses an absolute path outside the workspace without reading it (Codex repro)', async () => {
