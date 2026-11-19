@@ -17,6 +17,9 @@ import { styleFileLocations } from './style-guide.ts'
 import { PAGE_CONFIG_GLOBAL, STYLE_FILES_PATH, type StyleId } from './style.ts'
 import { readStyle, styleFieldSchema, type StyleSetting } from './style-setting.ts'
 import { handleStyleFiles, styleFilesHost } from './style-files.ts'
+import { IMAGE_ROUTE_PATH } from './fragment.ts'
+import { handleImageRequest, storeRoot } from './storage.ts'
+import { installSelfRepair } from './self-repair.ts'
 
 export { VISUALIZE_TOOL_NAME } from './tool.ts'
 export { visualizeMetaFrom, type VisualizeMeta, type VisualizeMode } from './fragment.ts'
@@ -46,37 +49,49 @@ export interface Config {
    * {@link readStyle}, never once at startup.
    */
   style: StyleSetting
+  /**
+   * Same-turn self-repair (see self-repair.ts): when a turn is about to end
+   * with a failed or broken card, or with card markup pasted into the reply
+   * instead of rendered, steer one short correction into the same turn.
+   * Default on (absent reads as on); hosts without the stop boundary ignore it.
+   */
+  selfRepair?: boolean
 }
 
 /** Schemastery configuration validated by the Loader. */
 export const Config: z<Config> = z.object({
   maxFragmentBytes: z.natural().default(1_000_000),
   style: styleFieldSchema(),
+  selfRepair: z.boolean().default(true).description('Same-turn self-repair · 同回合自我修复'),
 }) as unknown as z<Config>
 
 /**
- * Register the tool, the bundled skill provider, the page config, and the
- * style-file route of the settings page.
+ * Register the tool, the bundled skill provider, the page config, the
+ * style-file route of the settings page, the image route, and the same-turn
+ * self-repair.
  * @param ctx - registrant context.
  * @param config - validated deployment configuration.
  */
 export function apply(ctx: Context, config: Config): void {
   const style = () => readStyle(config.style)
+  const imageRoute = registerImageRoute(ctx)
+  const images = { delivery: () => imageRoute.ready }
   // The tool's description names the style, so it is rebuilt when the
   // setting changes; calls already read the style per call.
   let toolStyle = style()
-  let disposeTool = ctx.tools.register(visualizeTool(ctx, config.maxFragmentBytes, style))
+  let disposeTool = ctx.tools.register(visualizeTool(ctx, config.maxFragmentBytes, style, images))
   const events = ctx as unknown as { on(name: 'loader/volatile-update', listener: () => void): unknown }
   events.on('loader/volatile-update', () => {
     if (style() === toolStyle) return
     disposeTool()
     toolStyle = style()
-    disposeTool = ctx.tools.register(visualizeTool(ctx, config.maxFragmentBytes, style))
+    disposeTool = ctx.tools.register(visualizeTool(ctx, config.maxFragmentBytes, style, images))
   })
   ctx.skills.registerProvider(() => visualizeSkillProvider(style, cwd => styleFileLocations(ctx, cwd)))
   injectPageConfig(ctx, style)
   registerStyleFiles(ctx)
   declineGeneratedSettingsPage(ctx)
+  if (config.selfRepair !== false) installSelfRepair(ctx)
 }
 
 /** The structured index row this plugin contributes (see `@deepseek-ai/dsh-host-webserver`). */
@@ -135,6 +150,38 @@ function registerStyleFiles(ctx: Context): void {
       fetch: async request => await handleStyleFiles(host, request),
     }), 'dsh-visualize: style files route')
   })
+}
+
+/**
+ * Serve stored card images on the host's `/api` channel (dsh 0.1.7+), the
+ * only way their bytes reach a card without riding in the session log. The
+ * returned flag tells the tool whether the route is up: on a host without
+ * the channel the tool reports images as undeliverable rather than storing
+ * bytes no card can fetch.
+ * @param ctx - registrant context.
+ * @returns a live flag, true while the route is registered.
+ */
+function registerImageRoute(ctx: Context): { readonly ready: boolean } {
+  const state = { ready: false }
+  ctx.inject(['connection'], (scope) => {
+    const fetch = (scope.get('connection') as { fetch?: Partial<ConnectionFetch> } | undefined)?.fetch
+    if (typeof fetch?.register !== 'function') return
+    const register = fetch.register.bind(fetch) as ConnectionFetch['register']
+    scope.effect(() => {
+      const dispose = register({
+        path: IMAGE_ROUTE_PATH,
+        methods: ['GET', 'HEAD'],
+        requestBody: 'buffered',
+        fetch: async request => await handleImageRequest(storeRoot(ctx), request),
+      })
+      state.ready = true
+      return () => {
+        state.ready = false
+        return dispose()
+      }
+    }, 'dsh-visualize: card images route')
+  })
+  return state
 }
 
 /**

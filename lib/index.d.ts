@@ -83,6 +83,23 @@ interface VisualizeMeta {
    * styles existed, which read as the default.
    */
   style: StyleId;
+  /**
+   * Images the tool resolved from the fragment's `data-viz-src` attributes,
+   * as references only: the bytes stay in the plugin's card store and reach
+   * the card through {@link IMAGE_ROUTE_PATH}. Absent when there are none.
+   */
+  images?: CardImage[];
+}
+/** Image formats a card embeds; the tool verifies each by its magic bytes. */
+type CardImageType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'image/svg+xml';
+/** One resolved `data-viz-src`, as persisted meta carries it. */
+interface CardImage {
+  /** The attribute value exactly as the fragment spells it, entities undecoded. */
+  src: string;
+  /** Store id the image route serves: `<session segment>/<sha256>.<ext>`. */
+  id: string;
+  type: CardImageType;
+  bytes: number;
 }
 /**
  * Narrow one persisted `tool/result` meta value to a {@link VisualizeMeta}.
@@ -125,12 +142,20 @@ interface Config {
    * {@link readStyle}, never once at startup.
    */
   style: StyleSetting;
+  /**
+   * Same-turn self-repair (see self-repair.ts): when a turn is about to end
+   * with a failed or broken card, or with card markup pasted into the reply
+   * instead of rendered, steer one short correction into the same turn.
+   * Default on (absent reads as on); hosts without the stop boundary ignore it.
+   */
+  selfRepair?: boolean;
 }
 /** Schemastery configuration validated by the Loader. */
 declare const Config: z<Config>;
 /**
- * Register the tool, the bundled skill provider, the page config, and the
- * style-file route of the settings page.
+ * Register the tool, the bundled skill provider, the page config, the
+ * style-file route of the settings page, the image route, and the same-turn
+ * self-repair.
  * @param ctx - registrant context.
  * @param config - validated deployment configuration.
  */

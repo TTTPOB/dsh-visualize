@@ -6,7 +6,8 @@
  * reader's work-details mode folds (the default). A visualization is the
  * turn's output rather than its process, so this re-shows the turn's cards on
  * the turn tail, the seat the host's own deliverables use for the same
- * reason. The toolview card stays inside the fold as the call's own record.
+ * reason. The toolview card stays inside the fold as the call's own record;
+ * while a reader has that fold open, the tail skips the card (`shown-cards.ts`).
  *
  * The cards come from a state-only Conversation Definition that collects each
  * successful `visualize` result's persisted meta per turn; nothing here reads
@@ -21,7 +22,9 @@ import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-
 // Type-only: pulls the `conversation.chat.turnTail` SlotMap declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import { visualizeMetaFrom, type VisualizeMeta } from '../fragment.ts'
-import { Frame } from './VisualizeCard.tsx'
+import { Frame, type VisualizePromptInjected } from './VisualizeCard.tsx'
+import { cardStateKey } from './card-state.ts'
+import { isShownInToolview, useShownToolviewVersion } from './shown-cards.ts'
 
 /** Definition kind and Turn data key; namespaced by package to stay unique. */
 export const TURN_CARDS_KEY = 'dsh-visualize'
@@ -136,6 +139,7 @@ export function selectTurnCards(owner: { turn?: TurnLocation; seq: number }): re
 
 /** Folding observable injected by the registration. */
 export type TurnCardsInjected = InjectFace<{ readonly hooks: { readonly visualizeFolds: HostObservable<boolean> } }>
+  & VisualizePromptInjected
 
 /** A grid track sized `minmax(0, 1fr)`: an `auto` track would grow to a card's min-content. */
 const listStyle: CSSProperties = {
@@ -153,16 +157,25 @@ const listStyle: CSSProperties = {
  * @param props - turn owner props plus the injected folding selector.
  * @returns the turn's cards, or null.
  */
-export function TurnCards({ turn, seq, useVisualizeFolds }: PropsRuntime<'conversation.chat.turnTail'> & TurnCardsInjected) {
+export function TurnCards({ turn, seq, useVisualizeFolds, visualizePrompt, visualizeSession }: PropsRuntime<'conversation.chat.turnTail'> & TurnCardsInjected) {
   const folds = useVisualizeFolds(value => value)
-  const cards = cardsBefore(turn, seq)
+  useShownToolviewVersion()
+  // A card whose toolview copy is on screen (an opened fold) is skipped.
+  const cards = cardsBefore(turn, seq).filter(card => !isShownInToolview(card.callId))
   if (!folds || cards.length === 0) return null
   return (
     <div style={listStyle}>
       {cards.map(card => (
         // A distinct height token: the toolview frame for the same call may be
-        // mounted too (an opened fold) and reports under the bare call id.
-        <Frame key={card.callId} meta={card.meta} callId={`turn-tail:${card.callId}`} />
+        // mounted too (an opened fold) and reports under the bare call id. Both
+        // share the card's saved state.
+        <Frame
+          key={card.callId}
+          meta={card.meta}
+          callId={`turn-tail:${card.callId}`}
+          prompt={visualizePrompt}
+          stateKey={cardStateKey(visualizeSession, card.meta.path, card.callId)}
+        />
       ))}
     </div>
   )

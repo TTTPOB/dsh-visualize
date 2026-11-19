@@ -25,9 +25,9 @@ first chart, read `references/charts.md`; before styling anything, read
 - `references/design.md` — taste, theme tokens, base classes, layout.
 - `references/charts.md` — Chart.js-first charting, theme-color resolution,
   hand-rolled SVG rules, entrance animation recipes.
-- `examples/interactive-simulator.html` — sliders driving a Chart.js area
-  curve: probe-resolved theme colors, gradient fill, in-place updates. The
-  template for any standard chart.
+- `examples/interactive-simulator.html` — sliders wired with `dshViz.bind`
+  driving a `dshViz.chart` area curve: theme colors, gradient fill, in-place
+  updates, kept settings. The template for any standard chart.
 - `examples/comparison-chart.html` — a hand-rolled SVG comparison with
   direct labels and a hover detail. The template for custom visuals only.
 
@@ -66,8 +66,10 @@ not the chat column:
   reading-width content). Group content in `<section class="viz-section">`
   with its own heading.
 - Several views go behind tabs: `.viz-tabs` holding `<button
-  class="viz-tab" role="tab" aria-selected="true|false">`. Every filter
-  visibly changes every view it governs.
+  class="viz-tab" role="tab" aria-selected="true|false"
+  aria-controls="<panel id>">`. The frame switches tabs and shows their
+  panels by itself; write no tab script. Every filter visibly changes every
+  view it governs.
 - Lay out with grid: a KPI row, then charts two or three across, then
   detail tables. Reflow to one column below about 768px.
 - The document scrolls; `min-height: 100vh` is fine on a full-screen canvas
@@ -96,8 +98,9 @@ page, its `summary`, or the launcher loses its caption), and one exact
 - A refused patch tells you what the card actually contains at the site you
   aimed at. Correct `old_str` from that and retry in the same reply rather
   than re-rendering blind.
-- The card reloads on every change, so anything the user typed, dragged, or
-  scrolled inside it resets. Batch corrections instead of trickling them.
+- The card reloads on every change. What it keeps (see "Keeping what the
+  user set") survives; scroll, hover and anything else resets. Batch
+  corrections instead of trickling them.
 - A page tab the user already opened keeps its old version; after patching
   a page, tell them to open it again.
 
@@ -132,6 +135,8 @@ retrying.
   `cdnjs.cloudflare.com`, `esm.sh`, `cdn.jsdelivr.net`, `unpkg.com`,
   `fonts.googleapis.com`, `fonts.gstatic.com`, `fonts.bunny.net` — always
   with a pinned version.
+- Show an image the card cannot load itself — a workspace file, or a web
+  image off that list — with `data-viz-src`; see "Images" below.
 - Every color comes from a theme variable or a `light-dark()` pair — the
   token list and utility classes are in `references/design.md`.
 - Never declare `color-scheme` yourself. The document already carries the
@@ -142,6 +147,104 @@ retrying.
   recipes (Chart.js gives this by default).
 - Before finishing, confirm every element your script queries exists, every
   identifier is defined, and the main interaction visibly changes the output.
+
+## Wiring controls
+
+The frame's `dshViz` helper already does the wiring most cards repeat. Use
+it instead of hand-writing listeners, readout updates and number formatting:
+
+```js
+dshViz.bind('#my-viz', function (p) {
+  // p.rate, p.mode, …: every control under #my-viz with a `name`
+  redraw(p);
+  return { total: p.rate * 12 };  // fills <output data-viz-out="total">
+});
+```
+
+- `dshViz.bind(root, render)` calls `render(p)` once now and again after
+  every change. `p` holds each control's value by its `name` (or
+  `data-viz-param`): numbers from range and number inputs and numeric
+  options, booleans from checkboxes, the checked radio's value.
+- Every `[data-viz-out="key"]` inside `root` shows what `render` returned
+  under `key`, else `p[key]`; numbers go through `dshViz.fmt`. Return
+  formatted strings for anything with a unit.
+- `bind` returns a function that renders again; call it when something
+  outside the controls changes.
+- `dshViz.fmt(n, digits)` or `dshViz.fmt(n, { digits, sig, unit, percent,
+  compact, sign, currency })` formats a number with grouping. `unit` is
+  appended as written (`' min'`, `'°C'`); `percent` takes a fraction.
+- `dshViz.chart` creates a Chart.js chart that `render` can feed from its
+  first call; see `references/charts.md`.
+
+## Images
+
+The card cannot read workspace files or load images from hosts off the
+allowlist. Write `data-viz-src` on the `<img>` instead of `src`, and the tool
+embeds the image when you call it:
+
+- `<img data-viz-src="figs/loss.png" alt="…">` — a file inside the
+  workspace, relative to its root. Save a generated figure there first (for
+  example matplotlib `savefig`), then render the card.
+- `<img data-viz-src="https://…" alt="…">` — a public web image, fetched by
+  the tool. Local servers and private networks are refused; copy such an
+  image into the workspace and give its path.
+- PNG, JPEG, GIF, WebP or SVG only, at most 5 MB each and 12 MB and 16
+  images per card. Downscale big figures before embedding them.
+- Give every image an `alt`, and `width`/`height` where you know them: an
+  image that fails shows a placeholder box with its alt text, and the rest
+  of the card still renders.
+- Only `<img>` tags in the markup are embedded, not ones a script builds. A
+  script that measures an image waits for its `load` event.
+- The result lists each image that failed and why. Fix the path or URL and
+  patch the card; do not fall back to `src`.
+- An `update` reuses fetched URL images and reads workspace files again, so
+  after regenerating a figure under the same name, any patch shows the new
+  one.
+
+## Keeping what the user set
+
+A card reloads when the page refreshes, the session is reopened, or you
+patch it. Keep the choices the user made so it comes back as they left it:
+
+- Put `data-viz-keep` on a container (usually your root) and every control
+  inside with an `id` or `name` is saved on `input` / `change` and restored
+  on load; radios share a `name`. A single control takes the attribute
+  itself, optionally with a key: `data-viz-keep="speed"`. A `.viz-tabs`
+  with an `id` in there keeps its selected tab too.
+- Restoring fires the control's `input` and `change` events, so handlers
+  you wired redraw, and `dshViz.bind` renders the restored values first.
+  Write controls before the script that reads them.
+- Other state the user chose — a selected item, a step, a zoom — goes
+  through `dshViz.state.set(key, value)` and
+  `dshViz.state.get(key, fallback)`: JSON values, under 16 KB per card,
+  readable synchronously the moment your script runs.
+- Keep choices, not results: never data, computed output, or animation
+  progress. A reset control calls `dshViz.state.clear()` and puts the
+  defaults back.
+- A patch keeps the saved state. Rename a key when a patch changes what it
+  means.
+
+## Handing back to the conversation
+
+`dshViz.prompt(text)` puts `text` into the chat composer as a draft. The
+user reads it, edits it if they like, and sends it; the card never sends
+anything itself. Use it where the card ends in a choice the conversation
+should act on: a quiz answer, a picked option, a submitted form, "go deeper
+on this one".
+
+- Call it only from a click or submit handler, once per action. Never call it
+  on load, on a timer, or from `input` / `change` / slider events; those
+  calls are dropped.
+- Write `text` as the user speaking, in their language, carrying what the
+  card knows: `我选了 B（O(n log n)），帮我解释为什么 A 不对`, not
+  `button_b_clicked`. Keep it under 2000 characters.
+- Check `dshViz.canPrompt` first. It is false where the card cannot hand text
+  back (a card opened in its own tab, an older host); hide or disable the
+  prompt-only controls then. The card must stay useful without them.
+- The text lands in an empty composer, or replaces what a card put there
+  before, so a user who changes their pick just gets the new text. If the
+  user has typed or edited the draft, it is kept and a notice explains why;
+  do not build flows that depend on the text landing.
 
 ## Card style
 
