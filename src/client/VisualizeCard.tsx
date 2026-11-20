@@ -164,7 +164,7 @@ function openLabel(): string {
   return hostIsZh() ? '在新窗口打开' : 'Open in new window'
 }
 
-/** Prefix marking a nested card that a later call in the same program replaced. */
+/** Prefix marking a card that a later call in the same Turn replaced. */
 function supersededLabel(): string {
   return hostIsZh() ? '旧版本' : 'Earlier version'
 }
@@ -598,13 +598,14 @@ type VisualizeCardProps = ToolCallViewProps & VisualizePromptInjected & { useCha
  * the frame. A superseded nested result mounts its historical frame on demand.
  */
 export function VisualizeCard(props: VisualizeCardProps) {
-  if (props.useChat !== undefined && 'kind' in props.block && 'parentCallId' in props.block && props.block.parentCallId !== undefined) {
-    return <NestedVisualizeCard {...props} useChat={props.useChat} />
+  // Native and nested results alike collapse once the same Turn holds a later version.
+  if (props.useChat !== undefined && 'kind' in props.block) {
+    return <TrackedVisualizeCard {...props} useChat={props.useChat} />
   }
   return <VisualizeResult {...props} />
 }
 
-function NestedVisualizeCard(props: VisualizeCardProps & { useChat: UseChat }) {
+function TrackedVisualizeCard(props: VisualizeCardProps & { useChat: UseChat }) {
   const superseded = props.useChat(chat => isSuperseded(chat, props.callId))
   return <VisualizeResult {...props} superseded={superseded} />
 }

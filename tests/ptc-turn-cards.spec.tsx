@@ -148,6 +148,53 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     </>))
   }
 
+  /** Render every settled tool-call row of a Turn the way an expanded process shows it. */
+  function renderProcessRows(chat: ChatSnapshot) {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    element ??= document.createElement('div')
+    document.body.append(element)
+    mount ??= createRoot(element)
+    const useChat: UseChat = pick => pick(chat)
+    const roots = chat.nodes.values().filter(node => node.kind === 'tool-call')
+      .map(node => (node as ChatNode<'tool-call'>).data.root)
+    const blocks = roots.flatMap(block => 'kind' in block && block.subCalls.length > 0 ? block.subCalls : [block])
+    act(() => mount?.render(<div data-process>
+      {blocks.map(block => <Card key={block.callId} callId={block.callId} block={block} useChat={useChat} />)}
+    </div>))
+  }
+
+  it.each([
+    ['native calls', (h: ReturnType<typeof history>) => {
+      h.native('A1'); h.nextStep(); h.native('A2'); h.nextStep(); h.native('A3')
+    }],
+    ['PTC calls across two roots', (h: ReturnType<typeof history>) => {
+      h.ptc('root-1', [{ title: 'A1' }, { title: 'A2' }]); h.nextStep(); h.ptc('root-2', [{ title: 'A3' }])
+    }],
+    ['a native call superseded by a PTC call', (h: ReturnType<typeof history>) => {
+      h.native('A1'); h.nextStep(); h.ptc('root', [{ title: 'A2' }, { title: 'A3' }])
+    }],
+  ] as const)('collapses earlier versions of %s in an expanded process', (_name, write) => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [{}] as never)
+    const log = history()
+    log.start(); write(log); log.close()
+    renderProcessRows(assemble(log.events, 'replay'))
+    expect(frames('process')).toEqual(['A3'])
+    const summaries = [...element.querySelectorAll<HTMLElement>('summary')].map(node => node.textContent)
+    expect(summaries).toEqual(['Earlier version · A1', 'Earlier version · A2'])
+  })
+
+  it('keeps a card from an earlier Turn whole when a later Turn updates it', () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [{}] as never)
+    const log = history()
+    log.start(); log.native('A1'); log.close()
+    log.start(); log.native('A2'); log.close()
+    renderProcessRows(assemble(log.events, 'replay'))
+    expect(frames('process')).toEqual(['A1', 'A2'])
+    expect(element.querySelectorAll('summary')).toHaveLength(0)
+  })
+
   function frames(where = 'tail') {
     return [...element.querySelectorAll<HTMLIFrameElement>(`[data-${where}] iframe`)].map(frame => frame.title)
   }
