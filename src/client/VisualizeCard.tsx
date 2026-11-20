@@ -164,6 +164,11 @@ function openLabel(): string {
   return hostIsZh() ? '在新窗口打开' : 'Open in new window'
 }
 
+/** Prefix marking a nested card that a later call in the same program replaced. */
+function supersededLabel(): string {
+  return hostIsZh() ? '旧版本' : 'Earlier version'
+}
+
 /** Status line while a card's images load, in the host's language. */
 function loadingImagesLabel(): string {
   return hostIsZh() ? '正在载入图片…' : 'loading images…'
@@ -638,7 +643,7 @@ function SupersededCard({ meta, callId }: { meta: VisualizeMeta; callId: string 
   return (
     <details onToggle={event => setOpen(event.currentTarget.open)}>
       <summary style={{ ...headerStyle, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {meta.title}
+        {`${supersededLabel()} · ${meta.title}`}
       </summary>
       {open && <Frame meta={meta} callId={callId} />}
     </details>

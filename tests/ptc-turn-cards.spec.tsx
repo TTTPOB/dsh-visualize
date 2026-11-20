@@ -205,7 +205,7 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     render(chat, row.data.root)
     expect(frames('process')).toEqual(['A3'])
     const summaries = [...element.querySelectorAll<HTMLElement>('summary')]
-    expect(summaries.map(node => node.textContent)).toEqual(['A1', 'A2'])
+    expect(summaries.map(node => node.textContent)).toEqual(['Earlier version · A1', 'Earlier version · A2'])
     expect(frames()).toEqual([])
 
     const toggle = async () => {
