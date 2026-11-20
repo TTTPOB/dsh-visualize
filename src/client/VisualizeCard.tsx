@@ -43,6 +43,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import { DisclosureRow, IconClockOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { visualizeMetaFrom, visualizeMetaFromArgs, type VisualizeMeta } from '../fragment.ts'
 import { buildFrameDoc, HEIGHT_MESSAGE_TYPE, type FrameVariant } from '../shell.ts'
 import { PROMPT_INTERVAL_MS, readerIsInFrame, readPromptMessage, type PromptSink } from './prompt-bridge.ts'
@@ -52,6 +53,8 @@ import { liveStyle, noteSettledStyle } from './style.ts'
 import { useCardImages } from './images.ts'
 import { cardStateKey, cardStates, readStateMessage } from './card-state.ts'
 import { useReportShown } from './shown-cards.ts'
+import type { UseChat } from '@deepseek-ai/dsh-client-ui-chat/client'
+import { isSuperseded } from './card-results.ts'
 
 /** Iframe height bounds; content beyond the cap scrolls inside the frame. */
 const MIN_HEIGHT = 48
@@ -160,6 +163,11 @@ function hostIsZh(): boolean {
 /** Accessible name of the open control, in the host's language. */
 function openLabel(): string {
   return hostIsZh() ? '在新窗口打开' : 'Open in new window'
+}
+
+/** Prefix marking a card that a later call in the same Turn replaced. */
+function supersededLabel(): string {
+  return hostIsZh() ? '旧版本' : 'Earlier version'
 }
 
 /** Status line while a card's images load, in the host's language. */
@@ -582,13 +590,28 @@ function PageLauncher({ meta, callId, prompt, stateKey }: FrameProps) {
   )
 }
 
+type VisualizeCardProps = ToolCallViewProps & VisualizePromptInjected & { useChat?: UseChat }
+
 /**
  * Keyed toolview for the `visualize` tool. Running calls and malformed or
  * failed results stay quiet single lines; a well-formed persisted meta — or
  * the fragment in the call's own arguments for nested dispatches — mounts
- * the frame. Only a settled card relays prompts.
+ * the frame. A superseded nested result mounts its historical frame on demand.
  */
-export function VisualizeCard({ callId, block, visualizePrompt, visualizeSession }: ToolCallViewProps & VisualizePromptInjected) {
+export function VisualizeCard(props: VisualizeCardProps) {
+  // Native and nested results alike collapse once the same Turn holds a later version.
+  if (props.useChat !== undefined && 'kind' in props.block) {
+    return <TrackedVisualizeCard {...props} useChat={props.useChat} />
+  }
+  return <VisualizeResult {...props} />
+}
+
+function TrackedVisualizeCard(props: VisualizeCardProps & { useChat: UseChat }) {
+  const superseded = props.useChat(chat => isSuperseded(chat, props.callId))
+  return <VisualizeResult {...props} superseded={superseded} />
+}
+
+function VisualizeResult({ callId, block, visualizePrompt, visualizeSession, superseded, useDisclosure }: VisualizeCardProps & { superseded?: boolean }) {
   // dsh 0.1.7 adds a preparing phase whose block carries no arguments yet.
   const argsRaw = 'kind' in block ? block.call?.argsRaw : 'argsRaw' in block ? block.argsRaw : undefined
   if (!('kind' in block)) {
@@ -608,10 +631,28 @@ export function VisualizeCard({ callId, block, visualizePrompt, visualizeSession
     // show the durable result text instead of guessing at markup.
     return <div style={headerStyle}>{firstResultLine(block.content)}</div>
   }
+  if (superseded) return <SupersededCard meta={meta} callId={callId} useDisclosure={useDisclosure} />
   return (
     <ShownBox callId={callId}>
       <Frame meta={meta} callId={callId} prompt={visualizePrompt} stateKey={cardStateKey(visualizeSession, meta.path, callId)} />
     </ShownBox>
+  )
+}
+
+/** Mount an older version only when requested, without sharing the current card's state. */
+function SupersededCard({ meta, callId, useDisclosure }: Pick<VisualizeCardProps, 'callId' | 'useDisclosure'> & { meta: VisualizeMeta }) {
+  const { expanded, toggle } = useDisclosure()
+  return (
+    <DisclosureRow
+      title={`${supersededLabel()} · ${meta.title}`}
+      icon={<IconClockOutlineRegular />}
+      open={expanded}
+      expandable
+      expandOnRowClick
+      onToggle={toggle}
+    >
+      {expanded && <Frame meta={meta} callId={callId} />}
+    </DisclosureRow>
   )
 }
 

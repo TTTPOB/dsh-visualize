@@ -9,9 +9,8 @@
  * reason. The toolview card stays inside the fold as the call's own record;
  * while a reader has that fold open, the tail skips the card (`shown-cards.ts`).
  *
- * The cards come from a state-only Conversation Definition that collects each
- * successful `visualize` result's persisted meta per turn; nothing here reads
- * the session log directly or imports host runtime code.
+ * Current Chat hosts index native and nested results together. Older hosts
+ * read native cards from the Turn Location's data store.
  */
 
 import type { CSSProperties } from 'react'
@@ -20,21 +19,16 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the `conversation.chat.turnTail` SlotMap declaration.
-import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
-import { visualizeMetaFrom, type VisualizeMeta } from '../fragment.ts'
+import type { ChatSnapshot, UseChat } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { Frame, type VisualizePromptInjected } from './VisualizeCard.tsx'
 import { cardStateKey } from './card-state.ts'
+import { latestCardsBefore, nativeCard, turnCardResults, type TurnCard } from './card-results.ts'
 import { isShownInToolview, useShownToolviewVersion } from './shown-cards.ts'
+
+export type { TurnCard } from './card-results.ts'
 
 /** Definition kind and Turn data key; namespaced by package to stay unique. */
 export const TURN_CARDS_KEY = 'dsh-visualize'
-
-/** One settled card, keyed by the call that produced it. */
-export interface TurnCard {
-  readonly callId: string
-  readonly seq: number
-  readonly meta: VisualizeMeta
-}
 
 /** Per-turn value published on the Turn Location. */
 export interface VisualizeTurnData {
@@ -50,23 +44,6 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
 
 interface TurnCardsState extends VisualizeTurnData {
   readonly turn: number
-}
-
-/** The slice of a `tool/result` event this Definition reads. */
-interface ToolResultData {
-  readonly turn: number
-  readonly meta?: unknown
-  readonly message: { readonly isError?: boolean; readonly source: { readonly callId: unknown } }
-}
-
-/**
- * Accept a successful root `visualize` result. The persisted meta names its
- * own kind, so no call-to-name bookkeeping is needed.
- * @param data - `tool/result` payload.
- * @returns the card descriptor, or undefined when unrelated or failed.
- */
-function resultMeta(data: ToolResultData): VisualizeMeta | undefined {
-  return data.message.isError === true ? undefined : visualizeMetaFrom(data.meta)
 }
 
 /**
@@ -90,9 +67,8 @@ export const turnCardsDefinition: ConversationNodeDefinition<TurnCardsState> = {
   kind: TURN_CARDS_KEY,
   match: (event) => {
     if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
-    if (event.type !== 'tool/result') return null
-    const data = event.data as ToolResultData
-    return resultMeta(data) === undefined ? null : { id: String(data.turn), role: 'update' }
+    if (event.type !== 'tool/result' || nativeCard(event) === undefined) return null
+    return { id: String(event.data.turn), role: 'update' }
   },
   start: (_context, match) => {
     if (match.event.type !== 'turn/start') throw new Error('dsh-visualize: turn cards start requires turn/start')
@@ -100,10 +76,9 @@ export const turnCardsDefinition: ConversationNodeDefinition<TurnCardsState> = {
   },
   update: (context, match) => {
     if (match.event.type !== 'tool/result') return context.state
-    const data = match.event.data as ToolResultData
-    const meta = resultMeta(data)
-    if (meta === undefined) return context.state
-    const cards = foldCard(context.state.cards, { callId: String(data.message.source.callId), seq: match.event.seq, meta })
+    const card = nativeCard(match.event)
+    if (card === undefined) return context.state
+    const cards = foldCard(context.state.cards, card)
     return cards === context.state.cards ? context.state : { ...context.state, cards }
   },
   buildLocationData: (context, scope, previous) => {
@@ -119,9 +94,11 @@ export const turnCardsDefinition: ConversationNodeDefinition<TurnCardsState> = {
  * The cards settled before the turn's closing reply.
  * @param turn - the closing turn; older hosts may omit its data store.
  * @param seq - the closing assistant message's sequence number.
+ * @param results - current Chat's indexed results, when available.
  * @returns the cards to show, possibly empty.
  */
-export function cardsBefore(turn: TurnLocation | undefined, seq: number): readonly TurnCard[] {
+export function cardsBefore(turn: TurnLocation | undefined, seq: number, results?: readonly TurnCard[]): readonly TurnCard[] {
+  if (results !== undefined) return latestCardsBefore(results, seq)
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- older hosts lack the data store
   const cards = turn?.data?.get(TURN_CARDS_KEY)?.cards ?? []
   return cards.filter(card => card.seq < seq)
@@ -150,6 +127,8 @@ const listStyle: CSSProperties = {
   minWidth: 0,
 }
 
+type TurnCardsProps = PropsRuntime<'conversation.chat.turnTail'> & TurnCardsInjected & { useChat?: UseChat }
+
 /**
  * Turn-tail entry. A list turn tail mounts it on every turn, so it declines
  * turns without cards itself, and it stays empty whenever the host is not
@@ -157,11 +136,21 @@ const listStyle: CSSProperties = {
  * @param props - turn owner props plus the injected folding selector.
  * @returns the turn's cards, or null.
  */
-export function TurnCards({ turn, seq, useVisualizeFolds, visualizePrompt, visualizeSession }: PropsRuntime<'conversation.chat.turnTail'> & TurnCardsInjected) {
+export function TurnCards(props: TurnCardsProps) {
+  return props.useChat === undefined ? <TurnCardList {...props} /> : <ChatTurnCards {...props} useChat={props.useChat} />
+}
+
+function ChatTurnCards(props: TurnCardsProps & { useChat: UseChat }) {
+  const results = props.useChat((chat: ChatSnapshot) => props.turn === undefined ? undefined : turnCardResults(chat, props.turn.turn))
+  return <TurnCardList {...props} results={results} />
+}
+
+function TurnCardList({ turn, seq, useVisualizeFolds, visualizePrompt, visualizeSession, results }:
+  TurnCardsProps & { results?: readonly TurnCard[] | undefined }) {
   const folds = useVisualizeFolds(value => value)
   useShownToolviewVersion()
   // A card whose toolview copy is on screen (an opened fold) is skipped.
-  const cards = cardsBefore(turn, seq).filter(card => !isShownInToolview(card.callId))
+  const cards = cardsBefore(turn, seq, results).filter(card => !isShownInToolview(card.callId))
   if (!folds || cards.length === 0) return null
   return (
     <div style={listStyle}>
