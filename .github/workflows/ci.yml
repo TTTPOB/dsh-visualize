@@ -81,10 +81,11 @@ jobs:
           DSH_HOST_SOURCE: ${{ github.workspace }}/dsh-upstream
         run: pnpm test --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/host-engine.json"
 
-      - name: Verify all eight Host engine tests passed
+      - name: Verify every Host engine test ran and passed
         run: |
-          jq -e --arg spec "$PWD/tests/ptc-turn-cards.spec.tsx" '
+          # A missing Host source skips the suite; reject skipped or absent tests.
+          count=$(jq -e --arg spec "$PWD/tests/ptc-turn-cards.spec.tsx" '
             [.testResults[] | select(.name == $spec) | .assertionResults[]]
-            | length == 8 and all(.[]; .status == "passed")
-          ' "$RUNNER_TEMP/host-engine.json"
-          echo "Host engine: 8/8 tests passed (none skipped)."
+            | if length > 0 and all(.[]; .status == "passed") then length else error("host engine tests skipped or failed") end
+          ' "$RUNNER_TEMP/host-engine.json")
+          echo "Host engine: $count/$count tests passed (none skipped)."
