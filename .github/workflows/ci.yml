@@ -28,3 +28,63 @@ jobs:
       # lib/ is committed, so the build must reproduce it exactly.
       - name: Committed lib/ is up to date
         run: git diff --exit-code -- lib
+
+  host-engine:
+    name: Host engine (${{ matrix.host-ref }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.host-ref == 'master' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host-ref:
+          - dsh-v0.2.2-rc.1 # Base of daily-driver-v0.2.2-rc.1-fork5.
+          - dsh-v0.2.2-rc.5 # Latest upstream release at the time of pinning.
+          - master
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    defaults:
+      run:
+        working-directory: visualize
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: visualize
+
+      - uses: actions/checkout@v5
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ matrix.host-ref }}
+          path: dsh-upstream
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            visualize/pnpm-lock.yaml
+            dsh-upstream/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # Vite resolves Host workspace imports to source; the store needs Zustand.
+      - name: Install Host source dependencies
+        working-directory: dsh-upstream
+        run: pnpm --filter @deepseek-ai/dsh-client-store --fail-if-no-match install --frozen-lockfile --ignore-scripts
+
+      - name: Test visualize against Host source
+        env:
+          DSH_HOST_SOURCE: ${{ github.workspace }}/dsh-upstream
+        run: pnpm test --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/host-engine.json"
+
+      - name: Verify all eight Host engine tests passed
+        run: |
+          jq -e --arg spec "$PWD/tests/ptc-turn-cards.spec.tsx" '
+            [.testResults[] | select(.name == $spec) | .assertionResults[]]
+            | length == 8 and all(.[]; .status == "passed")
+          ' "$RUNNER_TEMP/host-engine.json"
+          echo "Host engine: 8/8 tests passed (none skipped)."
