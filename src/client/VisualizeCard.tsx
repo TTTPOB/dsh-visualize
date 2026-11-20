@@ -43,6 +43,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import { DisclosureRow, IconClockOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { visualizeMetaFrom, visualizeMetaFromArgs, type VisualizeMeta } from '../fragment.ts'
 import { buildFrameDoc, HEIGHT_MESSAGE_TYPE, type FrameVariant } from '../shell.ts'
 import { PROMPT_INTERVAL_MS, readerIsInFrame, readPromptMessage, type PromptSink } from './prompt-bridge.ts'
@@ -610,7 +611,7 @@ function TrackedVisualizeCard(props: VisualizeCardProps & { useChat: UseChat }) 
   return <VisualizeResult {...props} superseded={superseded} />
 }
 
-function VisualizeResult({ callId, block, visualizePrompt, visualizeSession, superseded }: VisualizeCardProps & { superseded?: boolean }) {
+function VisualizeResult({ callId, block, visualizePrompt, visualizeSession, superseded, useDisclosure }: VisualizeCardProps & { superseded?: boolean }) {
   // dsh 0.1.7 adds a preparing phase whose block carries no arguments yet.
   const argsRaw = 'kind' in block ? block.call?.argsRaw : 'argsRaw' in block ? block.argsRaw : undefined
   if (!('kind' in block)) {
@@ -630,7 +631,7 @@ function VisualizeResult({ callId, block, visualizePrompt, visualizeSession, sup
     // show the durable result text instead of guessing at markup.
     return <div style={headerStyle}>{firstResultLine(block.content)}</div>
   }
-  if (superseded) return <SupersededCard meta={meta} callId={callId} />
+  if (superseded) return <SupersededCard meta={meta} callId={callId} useDisclosure={useDisclosure} />
   return (
     <ShownBox callId={callId}>
       <Frame meta={meta} callId={callId} prompt={visualizePrompt} stateKey={cardStateKey(visualizeSession, meta.path, callId)} />
@@ -639,15 +640,19 @@ function VisualizeResult({ callId, block, visualizePrompt, visualizeSession, sup
 }
 
 /** Mount an older version only when requested, without sharing the current card's state. */
-function SupersededCard({ meta, callId }: { meta: VisualizeMeta; callId: string }) {
-  const [open, setOpen] = useState(false)
+function SupersededCard({ meta, callId, useDisclosure }: Pick<VisualizeCardProps, 'callId' | 'useDisclosure'> & { meta: VisualizeMeta }) {
+  const { expanded, toggle } = useDisclosure()
   return (
-    <details onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary style={{ ...headerStyle, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {`${supersededLabel()} · ${meta.title}`}
-      </summary>
-      {open && <Frame meta={meta} callId={callId} />}
-    </details>
+    <DisclosureRow
+      title={`${supersededLabel()} · ${meta.title}`}
+      icon={<IconClockOutlineRegular />}
+      open={expanded}
+      expandable
+      expandOnRowClick
+      onToggle={toggle}
+    >
+      {expanded && <Frame meta={meta} callId={callId} />}
+    </DisclosureRow>
   )
 }
 
