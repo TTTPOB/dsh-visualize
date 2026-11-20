@@ -71,10 +71,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Vite resolves Host workspace imports to source; the store needs Zustand.
+      # Vite loads the Host store and DisclosureRow from source.
       - name: Install Host source dependencies
         working-directory: dsh-upstream
-        run: pnpm --filter @deepseek-ai/dsh-client-store --fail-if-no-match install --frozen-lockfile --ignore-scripts
+        run: pnpm --filter @deepseek-ai/dsh-client-store --filter @deepseek-ai/dsh-client-ui-primitives --fail-if-no-match install --frozen-lockfile --ignore-scripts
 
       - name: Test visualize against Host source
         env:
