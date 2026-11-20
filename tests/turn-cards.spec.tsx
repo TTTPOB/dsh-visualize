@@ -18,6 +18,7 @@ import {
   cardsBefore, foldCard, selectTurnCards, TURN_CARDS_KEY, turnCardsDefinition, TurnCards, type TurnCard,
 } from '../src/client/TurnCards.tsx'
 import { STREAM_KEY } from '../src/client/StreamingPreview.tsx'
+import { CARD_RESULT_KIND } from '../src/client/card-results.ts'
 import { useReportShown } from '../src/client/shown-cards.ts'
 import type { VisualizeMeta } from '../src/fragment.ts'
 
@@ -177,7 +178,7 @@ describe('client registration', () => {
 
   it('registers the stream and turn cards, the latter with both slot shapes, when the registry exists', () => {
     const { registered, definitions } = boot({})
-    expect(definitions).toEqual([STREAM_KEY, TURN_CARDS_KEY])
+    expect(definitions).toEqual([STREAM_KEY, TURN_CARDS_KEY, CARD_RESULT_KIND])
     const tail = registered.get('conversation.chat.turnTail')
     expect(tail?.options.id).toBe('dsh-visualize-cards')
     expect(tail?.options.select).toBe(selectTurnCards)

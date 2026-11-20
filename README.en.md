@@ -37,6 +37,8 @@ Compatible with DSH 0.1.1-rc.2 through 0.2.2-rc.3.
 
 ## Use it
 
+On hosts with the Chat card index, a folded turn shows the latest version of each path in its tail, whether updated by a native call or by `visualize` inside `run_code`. Opening the process fold hides tail copies of cards already visible there. Within one `run_code` call, a superseded card is a single title row: expand it to inspect that version.
+
 Tell the model what you want to explore, for example, “make an adjustable visualization of a sorting algorithm.” The model calls `visualize` with the whole HTML fragment as its `fragment` argument (plus an optional `title` and `mode`), and the card starts rendering while the model is still writing it. Side-by-side comparisons can use `mode: "wide"`. To correct a card it already drew, the model calls `action: "update"` with the card's `path` and one exact `old_str` → `new_str` replacement instead of resending the markup; `path` is only used by `update`.
 
 When the thing to build is bigger than a chat card, such as a dashboard with filters, a multi-view tool, a full-screen simulation, or a complete desktop mockup, the model builds a standalone page with `mode: "page"`. The conversation shows a launcher card with the title, a one-line description (the `summary` argument), a live thumbnail of the page, and an **Open page** button that opens the page full-size in a new tab. If the browser blocks the tab, **Show here** displays the page in the conversation instead. After an `update`, a tab you already opened keeps the old version; click **Open page** again to see the change.

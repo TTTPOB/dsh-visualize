@@ -19,6 +19,7 @@ import { StreamingPreview, streamDefinition } from './StreamingPreview.tsx'
 import { foldingSource, type FoldingHost } from './folding.ts'
 import { selectTurnCards, turnCardsDefinition, TurnCards } from './TurnCards.tsx'
 import { registerSettingsSection } from './settings.tsx'
+import { cardResultDefinition } from './card-results.ts'
 import { promptSinkFor } from './prompt-bridge.ts'
 
 export const name = 'dsh-visualize'
@@ -101,9 +102,11 @@ export function apply(ctx: ClientContext): void {
     const events = conversationEvents(ctx)
     if (events === undefined) return () => undefined
     const disposeDefinition = events.register(turnCardsDefinition as ConversationNodeDefinition)
+    const disposeResults = events.register(cardResultDefinition as ConversationNodeDefinition)
     const disposeTail = ctx.slots.register(turnTailOptions(ctx), TurnCards)
     return () => {
       disposeTail()
+      disposeResults()
       disposeDefinition()
     }
   })

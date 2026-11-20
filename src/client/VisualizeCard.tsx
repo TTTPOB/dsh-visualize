@@ -52,6 +52,8 @@ import { liveStyle, noteSettledStyle } from './style.ts'
 import { useCardImages } from './images.ts'
 import { cardStateKey, cardStates, readStateMessage } from './card-state.ts'
 import { useReportShown } from './shown-cards.ts'
+import type { UseChat } from '@deepseek-ai/dsh-client-ui-chat/client'
+import { isSuperseded } from './card-results.ts'
 
 /** Iframe height bounds; content beyond the cap scrolls inside the frame. */
 const MIN_HEIGHT = 48
@@ -582,13 +584,27 @@ function PageLauncher({ meta, callId, prompt, stateKey }: FrameProps) {
   )
 }
 
+type VisualizeCardProps = ToolCallViewProps & VisualizePromptInjected & { useChat?: UseChat }
+
 /**
  * Keyed toolview for the `visualize` tool. Running calls and malformed or
  * failed results stay quiet single lines; a well-formed persisted meta — or
  * the fragment in the call's own arguments for nested dispatches — mounts
- * the frame. Only a settled card relays prompts.
+ * the frame. A superseded nested result mounts its historical frame on demand.
  */
-export function VisualizeCard({ callId, block, visualizePrompt, visualizeSession }: ToolCallViewProps & VisualizePromptInjected) {
+export function VisualizeCard(props: VisualizeCardProps) {
+  if (props.useChat !== undefined && 'kind' in props.block && 'parentCallId' in props.block && props.block.parentCallId !== undefined) {
+    return <NestedVisualizeCard {...props} useChat={props.useChat} />
+  }
+  return <VisualizeResult {...props} />
+}
+
+function NestedVisualizeCard(props: VisualizeCardProps & { useChat: UseChat }) {
+  const superseded = props.useChat(chat => isSuperseded(chat, props.callId))
+  return <VisualizeResult {...props} superseded={superseded} />
+}
+
+function VisualizeResult({ callId, block, visualizePrompt, visualizeSession, superseded }: VisualizeCardProps & { superseded?: boolean }) {
   // dsh 0.1.7 adds a preparing phase whose block carries no arguments yet.
   const argsRaw = 'kind' in block ? block.call?.argsRaw : 'argsRaw' in block ? block.argsRaw : undefined
   if (!('kind' in block)) {
@@ -608,10 +624,24 @@ export function VisualizeCard({ callId, block, visualizePrompt, visualizeSession
     // show the durable result text instead of guessing at markup.
     return <div style={headerStyle}>{firstResultLine(block.content)}</div>
   }
+  if (superseded) return <SupersededCard meta={meta} callId={callId} />
   return (
     <ShownBox callId={callId}>
       <Frame meta={meta} callId={callId} prompt={visualizePrompt} stateKey={cardStateKey(visualizeSession, meta.path, callId)} />
     </ShownBox>
+  )
+}
+
+/** Mount an older version only when requested, without sharing the current card's state. */
+function SupersededCard({ meta, callId }: { meta: VisualizeMeta; callId: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary style={{ ...headerStyle, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {meta.title}
+      </summary>
+      {open && <Frame meta={meta} callId={callId} />}
+    </details>
   )
 }
 
