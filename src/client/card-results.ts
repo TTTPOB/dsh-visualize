@@ -86,15 +86,18 @@ export function latestCardsBefore(results: readonly TurnCard[], seq: number): re
   return [...byPath.values()]
 }
 
-/** A nested result is superseded only by a later successful version in the same PTC root. */
+/**
+ * A result is superseded by a later successful version of the same card path
+ * in the same Turn, whether either call was native or a PTC dispatch.
+ */
 export function isSuperseded(chat: ChatSnapshot, callId: string): boolean {
   // Conversation Context keys are length-prefixed kinds followed by the Definition's id.
   const node = chat.nodes?.get(`${CARD_RESULT_KIND.length}:${CARD_RESULT_KIND}${callId}`) as
     ChatNode<typeof CARD_RESULT_KIND> | undefined
-  if (node === undefined || node.data.rootCallId === undefined) return false
+  if (node === undefined) return false
   const location = node.location
   if (location.kind !== 'turn' && location.kind !== 'step') return false
   const current = node.data
   return turnCardResults(chat, location.turn.turn)?.some(card => card.seq > current.seq
-    && card.rootCallId === current.rootCallId && card.meta.path === current.meta.path) ?? false
+    && card.meta.path === current.meta.path) ?? false
 }
