@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { act, type ComponentType } from 'react'
+import { act, useState, type ComponentType } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ChatNode, ChatSnapshot, UseChat } from '@deepseek-ai/dsh-client-ui-chat/client'
@@ -17,6 +17,11 @@ if (process.env.DSH_HOST_SOURCE && !hasHostSource) throw new Error(`Missing DSH 
 
 const Tail = TurnCards as unknown as ComponentType<Record<string, unknown>>
 const Card = VisualizeCard as unknown as ComponentType<Record<string, unknown>>
+function useDisclosure() {
+  const [expanded, setExpanded] = useState(false)
+  return { expanded, setExpanded, toggle: () => setExpanded(open => !open) }
+}
+
 type Entry = { type: 'event'; event: { type: string; seq: number; time: number; surfaceOp?: 'append'; data: Record<string, unknown> } }
 
 function history() {
@@ -141,7 +146,7 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     const childCards = process !== undefined && 'kind' in process ? process.subCalls : []
     act(() => mount?.render(<>
       <div data-process>
-        {childCards.map(block => <Card key={block.callId} callId={block.callId} block={block} useChat={useChat} />)}
+        {childCards.map(block => <Card key={block.callId} callId={block.callId} block={block} useChat={useChat} useDisclosure={useDisclosure} />)}
       </div>
       <div data-tail><Tail {...tailOwner(chat, turn)} useChat={useChat}
         useVisualizeFolds={(pick: (folds: boolean) => boolean) => pick(true)} /></div>
@@ -159,7 +164,7 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
       .map(node => (node as ChatNode<'tool-call'>).data.root)
     const blocks = roots.flatMap(block => 'kind' in block && block.subCalls.length > 0 ? block.subCalls : [block])
     act(() => mount?.render(<div data-process>
-      {blocks.map(block => <Card key={block.callId} callId={block.callId} block={block} useChat={useChat} />)}
+      {blocks.map(block => <Card key={block.callId} callId={block.callId} block={block} useChat={useChat} useDisclosure={useDisclosure} />)}
     </div>))
   }
 
@@ -180,8 +185,8 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     log.start(); write(log); log.close()
     renderProcessRows(assemble(log.events, 'replay'))
     expect(frames('process')).toEqual(['A3'])
-    const summaries = [...element.querySelectorAll<HTMLElement>('summary')].map(node => node.textContent)
-    expect(summaries).toEqual(['Earlier version · A1', 'Earlier version · A2'])
+    expect(earlierRows().map(row => row.textContent?.split(' · ').at(-1))).toEqual(['A1', 'A2'])
+    expect(earlierRows().map(row => row.getAttribute('aria-expanded'))).toEqual(['false', 'false'])
   })
 
   it('keeps a card from an earlier Turn whole when a later Turn updates it', () => {
@@ -192,8 +197,12 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     log.start(); log.native('A2'); log.close()
     renderProcessRows(assemble(log.events, 'replay'))
     expect(frames('process')).toEqual(['A1', 'A2'])
-    expect(element.querySelectorAll('summary')).toHaveLength(0)
+    expect(earlierRows()).toHaveLength(0)
   })
+
+  function earlierRows() {
+    return [...element.querySelectorAll<HTMLElement>('[role="button"][aria-expanded]')]
+  }
 
   function frames(where = 'tail') {
     return [...element.querySelectorAll<HTMLIFrameElement>(`[data-${where}] iframe`)].map(frame => frame.title)
@@ -240,7 +249,7 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     expect(frames()).toEqual(['A2'])
   })
 
-  it('uses nested call IDs to keep one frame when opened or folded, with opt-in historical frames', async () => {
+  it('keeps one final frame and mounts historical snapshots on demand', async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
     vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [{}] as never)
     const log = history()
@@ -251,21 +260,18 @@ describe.skipIf(!hasHostSource)('turn cards in the DSH source Conversation engin
     const row = chat.nodes.values().find(node => node.kind === 'tool-call') as ChatNode<'tool-call'>
     render(chat, row.data.root)
     expect(frames('process')).toEqual(['A3'])
-    const summaries = [...element.querySelectorAll<HTMLElement>('summary')]
-    expect(summaries.map(node => node.textContent)).toEqual(['Earlier version · A1', 'Earlier version · A2'])
+    const [first, second] = earlierRows()
+    expect(earlierRows()).toHaveLength(2)
     expect(frames()).toEqual([])
 
-    const toggle = async () => {
-      const detail = summaries[0]!.closest('details')!
-      // jsdom does not dispatch a usable toggle event from summary activation.
-      await act(async () => {
-        detail.open = !detail.open
-        detail.dispatchEvent(new Event('toggle', { bubbles: true }))
-      })
-    }
-    await toggle()
+    act(() => first!.click())
+    expect(first!.getAttribute('aria-expanded')).toBe('true')
+    expect(second!.getAttribute('aria-expanded')).toBe('false')
     expect(frames('process')).toEqual(['A1', 'A3'])
-    await toggle()
+    expect(element.querySelector('iframe[title="A1"]')?.getAttribute('srcdoc')).toContain('<p>A1</p>')
+    expect(first!.tabIndex).toBe(0)
+    act(() => first!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(first!.getAttribute('aria-expanded')).toBe('false')
     expect(frames('process')).toEqual(['A3'])
 
     const process = element.querySelector('[data-process]')!

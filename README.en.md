@@ -37,7 +37,7 @@ Compatible with DSH 0.1.1-rc.2 through 0.2.2-rc.3.
 
 ## Use it
 
-On hosts with the Chat card index, a folded turn shows the latest version of each path in its tail, whether updated by a native call or by `visualize` inside `run_code`. Opening the process fold hides tail copies of cards already visible there. In the process, a card that a later call in the same turn updated (native or inside `run_code`) is a single "Earlier version" row: expand it to inspect that version. Cards from earlier turns stay whole.
+On hosts with the Chat card index, a folded turn shows the latest version of each path in its tail, whether updated by a native call or by `visualize` inside `run_code`. Opening the process fold hides tail copies of cards already visible there. In the process, a card that a later call in the same turn updated (native or inside `run_code`) is collapsed to an "Earlier version" row with a leading icon. Hover to see the chevron, then click the row or focus it and press Enter to inspect that version. Cards from earlier turns stay whole.
 
 Tell the model what you want to explore, for example, “make an adjustable visualization of a sorting algorithm.” The model calls `visualize` with the whole HTML fragment as its `fragment` argument (plus an optional `title` and `mode`), and the card starts rendering while the model is still writing it. Side-by-side comparisons can use `mode: "wide"`. To correct a card it already drew, the model calls `action: "update"` with the card's `path` and one exact `old_str` → `new_str` replacement instead of resending the markup; `path` is only used by `update`.
 
